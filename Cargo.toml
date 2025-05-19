@@ -1,5 +1,5 @@
 [package]
-name = "TORO-Maintainer"
+name = "server-maintainer"
 version = "0.1.0"
 edition = "2024"
 
