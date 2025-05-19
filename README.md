@@ -1,2 +1,2 @@
-# TORO-Maintainer
+# Docker-Minecraft-Paper-TORO
 
