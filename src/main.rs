@@ -1,94 +1,56 @@
-use reqwest::blocking::get;
+use reqwest::blocking::Client;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use std::{
-    fs::{self, File},
-    io::{Read, Write},
-    path::Path,
-};
+use url::Url;
 
-// JSON構造体のデシリアライズ用
-#[derive(Debug, Deserialize)]
-struct GeyserResponse {
-    downloads: Downloads,
+#[derive(Deserialize, Debug)]
+struct Release {
+    assets: Vec<Asset>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Downloads {
-    #[serde(rename = "spigot")]
-    spigot: DownloadDetail,
-    #[serde(rename = "fabric")]
-    fabric: DownloadDetail,
-    #[serde(rename = "bungeecord")]
-    bungeecord: DownloadDetail,
-    #[serde(rename = "velocity")]
-    velocity: DownloadDetail,
-}
-
-#[derive(Debug, Deserialize)]
-struct DownloadDetail {
-    sha256: String,
-}
-
-fn get_latest_sha256(download_type: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let url = "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest";
-    let resp = get(url)?.json::<GeyserResponse>()?;
-    let sha256 = match download_type {
-        "spigot" => &resp.downloads.spigot.sha256,
-        "fabric" => &resp.downloads.fabric.sha256,
-        "bungeecord" => &resp.downloads.bungeecord.sha256,
-        "velocity" => &resp.downloads.velocity.sha256,
-        _ => return Err("Invalid type".into()),
-    };
-    Ok(sha256.clone())
-}
-
-fn get_file_sha256(path: &str) -> Option<String> {
-    let file = File::open(path).ok()?;
-    let mut hasher = Sha256::new();
-    let mut reader = std::io::BufReader::new(file);
-    let mut buffer = [0; 4096];
-
-    loop {
-        let n = reader.read(&mut buffer).ok()?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-
-    Some(hex::encode(hasher.finalize()))
-}
-
-fn download_latest(download_type: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let url = format!("https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/{}", download_type);
-    let response = get(&url)?;
-    let bytes = response.bytes()?;
-
-    let path_obj = Path::new(path);
-    if let Some(parent) = path_obj.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let mut file = File::create(path)?;
-    file.write_all(&bytes)?;
-    Ok(())
+#[derive(Deserialize, Debug)]
+struct Asset {
+    browser_download_url: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let repo_url_str = "https://github.com/TORO-Server/InfinityDispense"; // Replace with the actual repository URL
 
-    let download_type = "velocity";
-    let path = "./Geyser.jar";
+    let parsed_url = Url::parse(repo_url_str)?;
 
-    let sha_cloud = get_latest_sha256(download_type)?;
-    let sha_local = get_file_sha256(path);
+    let segments: Vec<&str> = parsed_url
+        .path_segments()
+        .map(|c| c.collect())
+        .ok_or("Invalid URL path")?;
 
-    if sha_local.as_deref() != Some(&sha_cloud) {
-        println!("GeyserMC {} Download...", download_type);
-        download_latest(download_type, path)?;
-        println!("{} Done", path);
+    if segments.len() < 2 {
+        eprintln!("Invalid GitHub repository URL format.");
+        return Ok(());
+    }
+
+    let owner = segments[0];
+    let repo = segments[1];
+
+    let client = Client::new();
+    let api_url = format!(
+        "https://api.github.com/repos/{}/{}/releases/latest",
+        owner, repo
+    );
+
+    println!("Fetching latest release for {}/{}", owner, repo);
+
+    let response = client
+        .get(&api_url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "Mozilla/5.0")
+        // .header("Authorization", format!("Bearer {}", token))
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()?;
+
+    if response.status().is_success() {
+        let release: Release = response.json()?;
+        println!("{}", release.assets[0].browser_download_url);
     } else {
-        println!("Already up-to-date.");
+        eprintln!("Failed to fetch latest release: {:?}", response);
     }
 
     Ok(())
